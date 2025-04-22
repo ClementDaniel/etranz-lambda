@@ -3,9 +3,8 @@ pipeline {
 
     environment {
         AWS_REGION = 'us-east-1'
-        AWS_ACCOUNT_ID = '792527467644'
-        ECR_REPO_NAME = 'go-digi-task2'
-        IMAGE_NAME = 'helloworld-lambda'
+        ECR_URI = '792527467644.dkr.ecr.us-east-1.amazonaws.com/etranz-lambda'
+        IMAGE_NAME = 'etranz-lambda'
         LAMBDA_FUNCTION_NAME = 'ecr-trigger'
         // IAM_ROLE_ARN = 'arn:aws:iam::054774128594:role/go-digi-task'
     }
@@ -28,7 +27,7 @@ pipeline {
                     secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                 ]]) {
                     sh '''
-                    aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+                    aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 792527467644.dkr.ecr.us-east-1.amazonaws.com
                     aws ecr create-repository --repository-name $ECR_REPO_NAME
                     '''
                 }
