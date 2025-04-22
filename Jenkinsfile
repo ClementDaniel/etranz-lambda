@@ -3,7 +3,8 @@ pipeline {
 
     environment {
         AWS_REGION = 'us-east-1'
-        ECR_URI = '792527467644.dkr.ecr.us-east-1.amazonaws.com/etranz-lambda'
+        AWS_ACCOUNT_ID = '792527467644'
+        ECR_REPO_NAME = 'etranz-lambda'
         IMAGE_NAME = 'etranz-lambda'
         LAMBDA_FUNCTION_NAME = 'ecr-trigger'
         // IAM_ROLE_ARN = 'arn:aws:iam::054774128594:role/go-digi-task'
@@ -12,23 +13,26 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                script {
-                     git 'https://github.com/ClementDaniel/etranz-lambda.git'
-                }
+                checkout scm
             }
         }
 
-        stage('Create a ECR repository & Authentication of Docker client') {
+        stage('Authenticate & Create ECR Repo') {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
                     credentialsId: 'aws-credentials',
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID', 
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
                     secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                 ]]) {
                     sh '''
-                    aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 792527467644.dkr.ecr.us-east-1.amazonaws.com
-                    aws ecr create-repository --repository-name $ECR_REPO_NAME
+                    # Authenticate Docker to ECR
+                    aws ecr get-login-password --region $AWS_REGION | \
+                      docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+
+                    # Create ECR repo if it doesn't exist
+                    aws ecr describe-repositories --repository-names $ECR_REPO_NAME \
+                      || aws ecr create-repository --repository-name $ECR_REPO_NAME
                     '''
                 }
             }
@@ -36,26 +40,39 @@ pipeline {
 
         stage('Build and Push Docker Image') {
             steps {
-                script {
-                    sh '''
-                    docker build -t $IMAGE_NAME .
-                    docker tag $IMAGE_NAME:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_NAME:latest
-                    docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_NAME:latest
-                    '''
-                }
+                sh '''
+                docker build -t $IMAGE_NAME .
+                docker tag $IMAGE_NAME:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_NAME:latest
+                docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_NAME:latest
+                '''
             }
         }
-        
+
         stage('Deploy Lambda Function') {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
                     credentialsId: 'aws-credentials',
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID', 
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
                     secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                 ]]) {
                     sh '''
-                    aws lambda create-function --function-name $LAMBDA_FUNCTION_NAME --package-type Image --code ImageUri=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_NAME:latest --role $IAM_ROLE_ARN --region $AWS_REGION
+                    # Check if Lambda exists, then update or create
+                    if aws lambda get-function --function-name $LAMBDA_FUNCTION_NAME > /dev/null 2>&1; then
+                      echo "Function exists, updating..."
+                      aws lambda update-function-code \
+                        --function-name $LAMBDA_FUNCTION_NAME \
+                        --image-uri $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_NAME:latest \
+                        --region $AWS_REGION
+                    else
+                      echo "Creating new Lambda function..."
+                      aws lambda create-function \
+                        --function-name $LAMBDA_FUNCTION_NAME \
+                        --package-type Image \
+                        --code ImageUri=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_NAME:latest \
+                        --role $IAM_ROLE_ARN \
+                        --region $AWS_REGION
+                    fi
                     '''
                 }
             }
