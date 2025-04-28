@@ -1,7 +1,7 @@
 pipeline {
     agent {
         docker {
-            image 'amazon/aws-cli:2.15.34' // AWS CLI image
+            image 'my-aws-docker-cli:latest'
             args '-v /var/run/docker.sock:/var/run/docker.sock' // Mount Docker socket
         }
     }
