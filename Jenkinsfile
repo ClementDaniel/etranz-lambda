@@ -26,13 +26,13 @@ pipeline {
         stage('Run in Docker') {
             steps {
                 script {
-                    docker.image(env.CUSTOM_IMAGE).inside(
-                        "-v /var/run/docker.sock:/var/run/docker.sock " +
-                        "-u root " +
-                        "--group-add=$(stat -c '%g' /var/run/docker.sock)"
-                    ) {
+                    docker.image(env.CUSTOM_IMAGE).inside('''
+                        -v /var/run/docker.sock:/var/run/docker.sock
+                        -u root
+                        --group-add=$(stat -c '%g' /var/run/docker.sock)
+                    ''') {
 
-                        withCredentials([[
+                        withCredentials([[ 
                             $class: 'AmazonWebServicesCredentialsBinding',
                             credentialsId: 'aws-credentials',
                             accessKeyVariable: 'AWS_ACCESS_KEY_ID',
@@ -49,7 +49,7 @@ pipeline {
                               || aws ecr create-repository --repository-name $ECR_REPO_NAME
 
                             # Build and push Docker image
-                            docker build -t $IMAGE_NAME .
+                            docker build -t $IMAGE_NAME . 
                             docker tag $IMAGE_NAME:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_NAME:latest
                             docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_NAME:latest
 
