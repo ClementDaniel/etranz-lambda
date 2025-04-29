@@ -27,12 +27,12 @@ pipeline {
         stage('Run in Docker') {
             steps {
                 script {
-                    docker.image(env.CUSTOM_IMAGE).inside(
-                        "-v /var/run/docker.sock:/var/run/docker.sock " +
-                        "-u root " +
-                        "--group-add=$(stat -c '%g' /var/run/docker.sock)"
-                    ) {
-                        withCredentials([[
+                    docker.image(env.CUSTOM_IMAGE).inside('''
+                        -v /var/run/docker.sock:/var/run/docker.sock 
+                        -u root 
+                        --group-add=$(stat -c '%g' /var/run/docker.sock)
+                    ''') {
+                        withCredentials([[ 
                             $class: 'AmazonWebServicesCredentialsBinding',
                             credentialsId: 'aws-credentials',
                             accessKeyVariable: 'AWS_ACCESS_KEY_ID',
