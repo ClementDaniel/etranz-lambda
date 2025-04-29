@@ -1,14 +1,5 @@
 pipeline {
-    agent {
-        docker {
-            image 'my-aws-docker-cli:latest'
-            args '''
-                -v /var/run/docker.sock:/var/run/docker.sock \
-                -u root \
-                --group-add $(stat -c '%g' /var/run/docker.sock)
-            '''
-        }
-    }
+    agent any
 
     environment {
         AWS_REGION = 'us-east-1'
@@ -16,7 +7,7 @@ pipeline {
         ECR_REPO_NAME = 'etranz-lambda'
         IMAGE_NAME = 'etranz-lambda'
         LAMBDA_FUNCTION_NAME = 'ecr-trigger'
-        // IAM_ROLE_ARN = 'arn:aws:iam::054774128594:role/go-digi-task'
+        CUSTOM_IMAGE = 'my-aws-docker-cli:local'
     }
 
     stages {
@@ -26,60 +17,61 @@ pipeline {
             }
         }
 
-        stage('Authenticate & Create ECR Repo') {
+        stage('Build Custom Docker Image for Pipeline') {
             steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-credentials',
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                ]]) {
-                    sh '''
-                    aws ecr get-login-password --region $AWS_REGION | \
-                      docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
-
-                    aws ecr describe-repositories --repository-names $ECR_REPO_NAME \
-                      || aws ecr create-repository --repository-name $ECR_REPO_NAME
-                    '''
-                }
+                sh 'docker build -t $CUSTOM_IMAGE -f Dockerfile .'
             }
         }
 
-        stage('Build and Push Docker Image') {
+        stage('Run in Docker') {
             steps {
-                sh '''
-                docker build -t $IMAGE_NAME .
-                docker tag $IMAGE_NAME:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_NAME:latest
-                docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_NAME:latest
-                '''
-            }
-        }
+                script {
+                    docker.image(env.CUSTOM_IMAGE).inside(
+                        "-v /var/run/docker.sock:/var/run/docker.sock " +
+                        "-u root " +
+                        "--group-add=$(stat -c '%g' /var/run/docker.sock)"
+                    ) {
 
-        stage('Deploy Lambda Function') {
-            steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-credentials',
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                ]]) {
-                    sh '''
-                    if aws lambda get-function --function-name $LAMBDA_FUNCTION_NAME > /dev/null 2>&1; then
-                      echo "Function exists, updating..."
-                      aws lambda update-function-code \
-                        --function-name $LAMBDA_FUNCTION_NAME \
-                        --image-uri $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_NAME:latest \
-                        --region $AWS_REGION
-                    else
-                      echo "Creating new Lambda function..."
-                      aws lambda create-function \
-                        --function-name $LAMBDA_FUNCTION_NAME \
-                        --package-type Image \
-                        --code ImageUri=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_NAME:latest \
-                        --role $IAM_ROLE_ARN \
-                        --region $AWS_REGION
-                    fi
-                    '''
+                        withCredentials([[
+                            $class: 'AmazonWebServicesCredentialsBinding',
+                            credentialsId: 'aws-credentials',
+                            accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                            secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                        ]]) {
+
+                            sh '''
+                            # Login to ECR
+                            aws ecr get-login-password --region $AWS_REGION | \
+                              docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+
+                            # Create ECR repo if not exists
+                            aws ecr describe-repositories --repository-names $ECR_REPO_NAME \
+                              || aws ecr create-repository --repository-name $ECR_REPO_NAME
+
+                            # Build and push Docker image
+                            docker build -t $IMAGE_NAME .
+                            docker tag $IMAGE_NAME:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_NAME:latest
+                            docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_NAME:latest
+
+                            # Deploy to Lambda
+                            if aws lambda get-function --function-name $LAMBDA_FUNCTION_NAME > /dev/null 2>&1; then
+                              echo "Function exists, updating..."
+                              aws lambda update-function-code \
+                                --function-name $LAMBDA_FUNCTION_NAME \
+                                --image-uri $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_NAME:latest \
+                                --region $AWS_REGION
+                            else
+                              echo "Creating new Lambda function..."
+                              aws lambda create-function \
+                                --function-name $LAMBDA_FUNCTION_NAME \
+                                --package-type Image \
+                                --code ImageUri=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_NAME:latest \
+                                --role $IAM_ROLE_ARN \
+                                --region $AWS_REGION
+                            fi
+                            '''
+                        }
+                    }
                 }
             }
         }
