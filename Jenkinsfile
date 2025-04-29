@@ -2,14 +2,18 @@ pipeline {
     agent {
         docker {
             image 'my-aws-docker-cli:latest'
-            args '-v /var/run/docker.sock:/var/run/docker.sock' // Mount Docker socket
+            args '''
+                -v /var/run/docker.sock:/var/run/docker.sock \
+                -u root \
+                --group-add $(stat -c '%g' /var/run/docker.sock)
+            '''
         }
     }
 
     environment {
         AWS_REGION = 'us-east-1'
         AWS_ACCOUNT_ID = '792527467644'
-        ECR_URI = '792527467644.dkr.ecr.us-east-1.amazonaws.com/etranz-lambda'
+        ECR_REPO_NAME = 'etranz-lambda'
         IMAGE_NAME = 'etranz-lambda'
         LAMBDA_FUNCTION_NAME = 'ecr-trigger'
         // IAM_ROLE_ARN = 'arn:aws:iam::054774128594:role/go-digi-task'
@@ -31,11 +35,9 @@ pipeline {
                     secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                 ]]) {
                     sh '''
-                    # Authenticate Docker to ECR
                     aws ecr get-login-password --region $AWS_REGION | \
                       docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
-                    # Create ECR repo if it doesn't exist
                     aws ecr describe-repositories --repository-names $ECR_REPO_NAME \
                       || aws ecr create-repository --repository-name $ECR_REPO_NAME
                     '''
@@ -62,7 +64,6 @@ pipeline {
                     secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                 ]]) {
                     sh '''
-                    # Check if Lambda exists, then update or create
                     if aws lambda get-function --function-name $LAMBDA_FUNCTION_NAME > /dev/null 2>&1; then
                       echo "Function exists, updating..."
                       aws lambda update-function-code \
